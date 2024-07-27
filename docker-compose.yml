@@ -1,0 +1,468 @@
+networks:
+  private-network:
+    driver: bridge
+    
+services:
+  set-genesis:
+    build:
+      context: .
+      dockerfile: ./dockerfile/prysmctl
+    volumes:
+      - ./originData:/originData
+      - ./nodeData/node1/execution:/nodeData/node1/execution
+      - ./nodeData/node1/consensus:/nodeData/node1/consensus
+      - ./nodeData/node2/execution:/nodeData/node2/execution
+      - ./nodeData/node2/consensus:/nodeData/node2/consensus
+      - ./nodeData/node3/execution:/nodeData/node3/execution
+      - ./nodeData/node3/consensus:/nodeData/node3/consensus
+    entrypoint: ["bash", "-c"]
+    command:
+      - >
+        prysmctl
+        testnet
+        generate-genesis
+        --fork ${FORK}
+        --genesis-time-delay=${GENESIS_TIME_DELAY}
+        --num-validators=${NUM_VALIDATORS}
+        --execution-endpoint=/nodeData/node1/geth.ipc
+        --chain-config-file=/originData/chain-config.yml
+        --geth-genesis-json-in=/originData/genesis.json
+        --geth-genesis-json-out=/nodeData/node1/execution/genesis.json
+        --output-ssz=/nodeData/node1/consensus/genesis.ssz &&
+        prysmctl
+        testnet
+        generate-genesis
+        --fork ${FORK}
+        --genesis-time-delay=${GENESIS_TIME_DELAY}
+        --num-validators=${NUM_VALIDATORS}
+        --execution-endpoint=/nodeData/node2/geth.ipc
+        --chain-config-file=/originData/chain-config.yml
+        --geth-genesis-json-in=/originData/genesis.json
+        --geth-genesis-json-out=/nodeData/node2/execution/genesis.json
+        --output-ssz=/nodeData/node2/consensus/genesis.ssz &&
+        prysmctl
+        testnet
+        generate-genesis
+        --fork ${FORK}
+        --genesis-time-delay=${GENESIS_TIME_DELAY}
+        --num-validators=${NUM_VALIDATORS}
+        --execution-endpoint=/nodeData/node3/geth.ipc
+        --chain-config-file=/originData/chain-config.yml
+        --geth-genesis-json-in=/originData/genesis.json
+        --geth-genesis-json-out=/nodeData/node3/execution/genesis.json
+        --output-ssz=/nodeData/node3/consensus/genesis.ssz
+    networks:
+      - private-network
+  
+  bootnode-exe:
+    build:
+      context: .
+      dockerfile: ./dockerfile/gethbootnode
+    ports:
+      - "${BOOT_PORT}:${BOOT_PORT}"
+      - "${BOOT_PORT}:${BOOT_PORT}/udp"
+    volumes:
+      - ./nodeData:/nodeData
+      - ./nodeData/bootnode:/nodeData/bootnode
+    entrypoint: ["bash", "-c"]
+    command:
+      - >
+        bootnode 
+        -genkey=/nodeData/bootnode/gethbootnode.key &&
+        bootnode
+        -nodekey=/nodeData/bootnode/gethbootnode.key
+        -addr=:${BOOT_PORT}
+        -verbosity=5
+        > /nodeData/bootnode/gethbootnode.log
+    networks:
+      - private-network
+
+  node1-exe:
+    build:
+      context: .
+      dockerfile: ./dockerfile/geth
+    ports:
+      - "${EXE1_HTTP_PORT}:${EXE1_HTTP_PORT}"
+      - "${EXE1_WS_PORT}:${EXE1_WS_PORT}"
+      - "${EXE1_PORT}:${EXE1_PORT}"
+      - "${EXE1_PORT}:${EXE1_PORT}/udp"
+      - "${EXE1_AUTHRPC_PORT}:${EXE1_AUTHRPC_PORT}"
+      - "${EXE1_METRICS_PORT}:${EXE1_METRICS_PORT}"
+    volumes:
+      - ./nodeData/bootnode:/nodeData/bootnode
+      - ./nodeData/node1:/nodeData/node1
+    entrypoint: ["bash", "-c"]
+    command:
+      - >
+        dockerize -wait file:///nodeData/bootnode/gethbootnode.log -wait file:///nodeData/node1/execution/genesis.json -timeout 30s &&
+        sed -i '1s/^\(.\{137\}\).\{9\}/\1bootnode-exe/' ./nodeData/bootnode/gethbootnode.log &&
+        geth --datadir=/nodeData/node1/execution/gethdata init /nodeData/node1/execution/genesis.json &&
+        geth 
+        --identity=${EXE1_IDENTITY}
+        --http
+        --http.vhosts=${EXE1_HTTP_VHOSTS}
+        --http.addr=${EXE1_HTTP_ADDR}
+        --http.port=${EXE1_HTTP_PORT}
+        --http.api=${EXE1_HTTP_API}
+        --http.corsdomain=${EXE1_HTTP_CORSDOMAIN}
+        --ws
+        --ws.addr=${EXE1_WS_ADDR}
+        --ws.port=${EXE1_WS_PORT}
+        --ws.api=${EXE1_WS_API}
+        --networkid=${CHAIN_ID}
+        --bootnodes=$(head -n 1 /nodeData/bootnode/gethbootnode.log)
+        --maxpeers=${EXE1_MAXPEERS}
+        --maxpendpeers=${EXE1_MAXPENDPEERS}
+        --syncmode=${EXE1_SYNCMODE}
+        --port=${EXE1_PORT}
+        --discovery.port=${EXE1_PORT}
+        --authrpc.vhosts=${EXE1_AUTHRPC_VHOSTS}
+        --authrpc.addr=${EXE1_AUTHRPC_ADDR}
+        --authrpc.port=${EXE1_AUTHRPC_PORT}
+        --ipcpath=/nodeData/node1/geth.ipc
+        --datadir=/nodeData/node1/execution/gethdata
+        --verbosity=${EXE1_VERBOSITY}
+        --metrics
+        --metrics.addr=${EXE1_METRICS_ADDR}
+        --metrics.port=${EXE1_METRICS_PORT}
+    networks:
+      - private-network
+
+  node1-con:
+    build:
+      context: .
+      dockerfile: ./dockerfile/prysm
+    ports:
+      - "${CON1_RPC_PORT}:${CON1_RPC_PORT}"
+      - "${CON1_GRPC_GATEWAY_PORT}:${CON1_GRPC_GATEWAY_PORT}"
+      - "${CON1_P2P_TCP_PORT}:${CON1_P2P_TCP_PORT}"
+      - "${CON1_P2P_UDP_PORT}:${CON1_P2P_UDP_PORT}/udp"
+      - "${CON1_MONITORING_PORT}:${CON1_MONITORING_PORT}"
+    volumes:
+      - ./originData:/originData
+      - ./nodeData/bootnode:/nodeData/bootnode
+      - ./nodeData/node1:/nodeData/node1
+    entrypoint: ["bash", "-c"]
+    command:
+      - >
+        dockerize -wait file:///nodeData/node1/consensus/genesis.ssz -wait file:///nodeData/node1/geth.ipc -timeout 30s &&
+        beacon-chain
+        --rpc-host=${CON1_RPC_HOST}
+        --rpc-port=${CON1_RPC_PORT}
+        --grpc-gateway-host=${CON1_GRPC_GATEWAY_HOST}
+        --grpc-gateway-port=${CON1_GRPC_GATEWAY_PORT}
+        --chain-id=${CHAIN_ID}
+        --bootstrap-node=""
+        --minimum-peers-per-subnet=${CON1_MINIMUM_PEERS_PER_SUBNET}
+        --min-sync-peers=${CON1_MIN_SYNC_PEERS}
+        --p2p-quic-port=${CON1_P2P_QUIC_PORT}
+        --p2p-tcp-port=${CON1_P2P_TCP_PORT}
+        --p2p-udp-port=${CON1_P2P_UDP_PORT}
+        --execution-endpoint=/nodeData/node1/geth.ipc
+        --datadir=/nodeData/node1/consensus/beacondata
+        --accept-terms-of-use
+        --chain-config-file=/originData/chain-config.yml
+        --genesis-state=/nodeData/node1/consensus/genesis.ssz
+        --interop-eth1data-votes
+        --contract-deployment-block=${CONTRACT_DEPLOYMENT_BLOCK}
+        --deposit-contract=${DEPOSIT_CONTRACT}
+        --suggested-fee-recipient=${CON1_SUGGESTED_FEE_RECIPIENT}
+        --slasher
+        --slasher-datadir=/nodeData/node1/consensus/slasherdata
+        --monitoring-host=${CON1_MONITORING_HOST}
+        --monitoring-port=${CON1_MONITORING_PORT}
+        --verbosity=${CON1_VERBOSITY}
+    networks:
+      - private-network
+  
+  node1-val:
+    build:
+      context: .
+      dockerfile: ./dockerfile/validator
+    ports:
+      - "${VAL1_RPC_PORT}:${VAL1_RPC_PORT}"
+      - "${VAL1_GRPC_GATEWAY_PORT}:${VAL1_GRPC_GATEWAY_PORT}"
+      - "${VAL1_MONITORING_PORT}:${VAL1_MONITORING_PORT}"
+    volumes:
+      - ./originData:/originData
+      - ./nodeData/node1:/nodeData/node1
+    entrypoint: ["bash", "-c"]
+    command: 
+      - >
+        dockerize -wait file:///nodeData/node1/consensus/genesis.ssz -timeout 30s &&
+        validator
+        --rpc-host=${VAL1_RPC_HOST}
+        --rpc-port=${VAL1_RPC_PORT}
+        --grpc-gateway-host=${VAL1_GRPC_GATEWAY_HOST}
+        --grpc-gateway-port=${VAL1_GRPC_GATEWAY_PORT}
+        --beacon-rpc-provider=${CON1_RPC_HOST}:${CON1_RPC_PORT}
+        --beacon-rpc-gateway-provider=${CON1_GRPC_GATEWAY_HOST}:${CON1_GRPC_GATEWAY_PORT}
+        --datadir=/nodeData/node1/consensus/validatordata
+        --accept-terms-of-use
+        --chain-config-file=/originData/chain-config.yml
+        --monitoring-host=${VAL1_MONITORING_HOST}
+        --monitoring-port=${VAL1_MONITORING_PORT}
+        --interop-num-validators=${VAL1_INTEROP_NUM_VALIDATORS}
+        --interop-start-index=${VAL1_INTEROP_START_INDEX}
+    networks:
+      - private-network
+
+  node2-exe:
+    build:
+      context: .
+      dockerfile: ./dockerfile/geth
+    ports:
+      - "${EXE2_HTTP_PORT}:${EXE2_HTTP_PORT}"
+      - "${EXE2_WS_PORT}:${EXE2_WS_PORT}"
+      - "${EXE2_PORT}:${EXE2_PORT}"
+      - "${EXE2_PORT}:${EXE2_PORT}/udp"
+      - "${EXE2_AUTHRPC_PORT}:${EXE2_AUTHRPC_PORT}"
+      - "${EXE2_METRICS_PORT}:${EXE2_METRICS_PORT}"
+    volumes:
+      - ./nodeData/bootnode:/nodeData/bootnode
+      - ./nodeData/node2:/nodeData/node2
+    entrypoint: ["bash", "-c"]
+    command:
+      - >
+        dockerize -wait file:///nodeData/node2/execution/genesis.json -wait http://${EXE1_METRICS_ADDR}:${EXE1_METRICS_PORT}/debug/metrics -timeout 30s &&
+        geth --datadir=/nodeData/node2/execution/gethdata init /nodeData/node2/execution/genesis.json &&
+        geth 
+        --identity=${EXE2_IDENTITY}
+        --http
+        --http.vhosts=${EXE2_HTTP_VHOSTS}
+        --http.addr=${EXE2_HTTP_ADDR}
+        --http.port=${EXE2_HTTP_PORT}
+        --http.api=${EXE2_HTTP_API}
+        --http.corsdomain=${EXE2_HTTP_CORSDOMAIN}
+        --ws
+        --ws.addr=${EXE2_WS_ADDR}
+        --ws.port=${EXE2_WS_PORT}
+        --ws.api=${EXE2_WS_API}
+        --networkid=${CHAIN_ID}
+        --bootnodes=$(head -n 1 /nodeData/bootnode/gethbootnode.log)
+        --maxpeers=${EXE2_MAXPEERS}
+        --maxpendpeers=${EXE2_MAXPENDPEERS}
+        --syncmode=${EXE2_SYNCMODE}
+        --port=${EXE2_PORT}
+        --discovery.port=${EXE2_PORT}
+        --authrpc.vhosts=${EXE2_AUTHRPC_VHOSTS}
+        --authrpc.addr=${EXE2_AUTHRPC_ADDR}
+        --authrpc.port=${EXE2_AUTHRPC_PORT}
+        --ipcpath=/nodeData/node2/geth.ipc
+        --datadir=/nodeData/node2/execution/gethdata
+        --verbosity=${EXE2_VERBOSITY}
+        --metrics
+        --metrics.addr=${EXE2_METRICS_ADDR}
+        --metrics.port=${EXE2_METRICS_PORT}
+    networks:
+      - private-network
+
+  node2-con:
+    build:
+      context: .
+      dockerfile: ./dockerfile/prysm
+    ports:
+      - "${CON2_RPC_PORT}:${CON2_RPC_PORT}"
+      - "${CON2_GRPC_GATEWAY_PORT}:${CON2_GRPC_GATEWAY_PORT}"
+      - "${CON2_P2P_TCP_PORT}:${CON2_P2P_TCP_PORT}"
+      - "${CON2_P2P_UDP_PORT}:${CON2_P2P_UDP_PORT}/udp"
+      - "${CON2_MONITORING_PORT}:${CON2_MONITORING_PORT}"
+    volumes:
+      - ./originData:/originData
+      - ./nodeData/bootnode:/nodeData/bootnode
+      - ./nodeData/node2:/nodeData/node2
+    entrypoint: ["bash", "-c"]
+    command:
+      - >
+        dockerize -wait file:///nodeData/node2/consensus/genesis.ssz -wait file:///nodeData/node2/geth.ipc -wait tcp://${CON1_MONITORING_HOST}:${CON1_MONITORING_PORT} -timeout 30s &&
+        curl ${CON1_MONITORING_HOST}:${CON1_MONITORING_PORT}/p2p > /nodeData/bootnode/prysmbootnode.log &&
+        sed -i '2s/^\(.\{5\}\)//;' /nodeData/bootnode/prysmbootnode.log &&
+        beacon-chain
+        --rpc-host=${CON2_RPC_HOST}
+        --rpc-port=${CON2_RPC_PORT}
+        --grpc-gateway-host=${CON2_GRPC_GATEWAY_HOST}
+        --grpc-gateway-port=${CON2_GRPC_GATEWAY_PORT}
+        --chain-id=${CHAIN_ID}
+        --bootstrap-node=$(head -n 2 /nodeData/bootnode/prysmbootnode.log | tail -n 1)
+        --minimum-peers-per-subnet=${CON2_MINIMUM_PEERS_PER_SUBNET}
+        --min-sync-peers=${CON2_MIN_SYNC_PEERS}
+        --p2p-quic-port=${CON2_P2P_QUIC_PORT}
+        --p2p-tcp-port=${CON2_P2P_TCP_PORT}
+        --p2p-udp-port=${CON2_P2P_UDP_PORT}
+        --execution-endpoint=/nodeData/node2/geth.ipc
+        --datadir=/nodeData/node2/consensus/beacondata
+        --accept-terms-of-use
+        --chain-config-file=/originData/chain-config.yml
+        --genesis-state=/nodeData/node2/consensus/genesis.ssz
+        --interop-eth1data-votes
+        --contract-deployment-block=${CONTRACT_DEPLOYMENT_BLOCK}
+        --deposit-contract=${DEPOSIT_CONTRACT}
+        --suggested-fee-recipient=${CON2_SUGGESTED_FEE_RECIPIENT}
+        --slasher
+        --slasher-datadir=/nodeData/node2/consensus/slasherdata
+        --monitoring-host=${CON2_MONITORING_HOST}
+        --monitoring-port=${CON2_MONITORING_PORT}
+        --verbosity=${CON2_VERBOSITY}
+    networks:
+      - private-network
+
+  node2-val:
+    build:
+      context: .
+      dockerfile: ./dockerfile/validator
+    ports:
+      - "${VAL2_RPC_PORT}:${VAL2_RPC_PORT}"
+      - "${VAL2_GRPC_GATEWAY_PORT}:${VAL2_GRPC_GATEWAY_PORT}"
+      - "${VAL2_MONITORING_PORT}:${VAL2_MONITORING_PORT}"
+    volumes:
+      - ./originData:/originData
+      - ./nodeData/node2:/nodeData/node2
+    entrypoint: ["bash", "-c"]
+    command: 
+      - >
+        dockerize -wait file:///nodeData/node2/consensus/genesis.ssz -timeout 30s &&
+        validator
+        --rpc-host=${VAL2_RPC_HOST}
+        --rpc-port=${VAL2_RPC_PORT}
+        --grpc-gateway-host=${VAL2_GRPC_GATEWAY_HOST}
+        --grpc-gateway-port=${VAL2_GRPC_GATEWAY_PORT}
+        --beacon-rpc-provider=${CON2_RPC_HOST}:${CON2_RPC_PORT}
+        --beacon-rpc-gateway-provider=${CON2_GRPC_GATEWAY_HOST}:${CON2_GRPC_GATEWAY_PORT}
+        --datadir=/nodeData/node2/consensus/validatordata
+        --accept-terms-of-use
+        --chain-config-file=/originData/chain-config.yml
+        --monitoring-host=${VAL2_MONITORING_HOST}
+        --monitoring-port=${VAL2_MONITORING_PORT}
+        --interop-num-validators=${VAL2_INTEROP_NUM_VALIDATORS}
+        --interop-start-index=${VAL2_INTEROP_START_INDEX}
+    networks:
+      - private-network
+
+  node3-exe:
+    build:
+      context: .
+      dockerfile: ./dockerfile/geth
+    ports:
+      - "${EXE3_HTTP_PORT}:${EXE3_HTTP_PORT}"
+      - "${EXE3_WS_PORT}:${EXE3_WS_PORT}"
+      - "${EXE3_PORT}:${EXE3_PORT}"
+      - "${EXE3_PORT}:${EXE3_PORT}/udp"
+      - "${EXE3_AUTHRPC_PORT}:${EXE3_AUTHRPC_PORT}"
+      - "${EXE3_METRICS_PORT}:${EXE3_METRICS_PORT}"
+    volumes:
+      - ./nodeData/bootnode:/nodeData/bootnode
+      - ./nodeData/node3:/nodeData/node3
+    entrypoint: ["bash", "-c"]
+    command:
+      - >
+        dockerize -wait file:///nodeData/node3/execution/genesis.json -wait http://${EXE1_METRICS_ADDR}:${EXE1_METRICS_PORT}/debug/metrics -timeout 30s &&
+        geth --datadir=/nodeData/node3/execution/gethdata init /nodeData/node3/execution/genesis.json &&
+        geth 
+        --identity=${EXE3_IDENTITY}
+        --http
+        --http.vhosts=${EXE3_HTTP_VHOSTS}
+        --http.addr=${EXE3_HTTP_ADDR}
+        --http.port=${EXE3_HTTP_PORT}
+        --http.api=${EXE3_HTTP_API}
+        --http.corsdomain=${EXE3_HTTP_CORSDOMAIN}
+        --ws
+        --ws.addr=${EXE3_WS_ADDR}
+        --ws.port=${EXE3_WS_PORT}
+        --ws.api=${EXE3_WS_API}
+        --networkid=${CHAIN_ID}
+        --bootnodes="$(head -n 1 /nodeData/bootnode/gethbootnode.log)"
+        --maxpeers=${EXE3_MAXPEERS}
+        --maxpendpeers=${EXE3_MAXPENDPEERS}
+        --syncmode=${EXE3_SYNCMODE}
+        --port=${EXE3_PORT}
+        --discovery.port=${EXE3_PORT}
+        --authrpc.vhosts=${EXE3_AUTHRPC_VHOSTS}
+        --authrpc.addr=${EXE3_AUTHRPC_ADDR}
+        --authrpc.port=${EXE3_AUTHRPC_PORT}
+        --ipcpath=/nodeData/node3/geth.ipc
+        --datadir=/nodeData/node3/execution/gethdata
+        --verbosity=${EXE3_VERBOSITY}
+        --metrics
+        --metrics.addr=${EXE3_METRICS_ADDR}
+        --metrics.port=${EXE3_METRICS_PORT}
+    networks:
+      - private-network
+
+  node3-con:
+    build:
+      context: .
+      dockerfile: ./dockerfile/prysm
+    ports:
+      - "${CON3_RPC_PORT}:${CON3_RPC_PORT}"
+      - "${CON3_GRPC_GATEWAY_PORT}:${CON3_GRPC_GATEWAY_PORT}"
+      - "${CON3_P2P_TCP_PORT}:${CON3_P2P_TCP_PORT}"
+      - "${CON3_P2P_UDP_PORT}:${CON3_P2P_UDP_PORT}/udp"
+      - "${CON3_MONITORING_PORT}:${CON3_MONITORING_PORT}"
+    volumes:
+      - ./originData:/originData
+      - ./nodeData/bootnode:/nodeData/bootnode
+      - ./nodeData/node3:/nodeData/node3
+    entrypoint: ["bash", "-c"]
+    command:
+      - >
+        dockerize -wait file:///nodeData/node3/consensus/genesis.ssz -wait file:///nodeData/node3/geth.ipc -wait tcp://${CON2_MONITORING_HOST}:${CON2_MONITORING_PORT} -timeout 30s &&
+        beacon-chain
+        --rpc-host=${CON3_RPC_HOST}
+        --rpc-port=${CON3_RPC_PORT}
+        --grpc-gateway-host=${CON3_GRPC_GATEWAY_HOST}
+        --grpc-gateway-port=${CON3_GRPC_GATEWAY_PORT}
+        --chain-id=${CHAIN_ID}
+        --bootstrap-node=$(head -n 2 /nodeData/bootnode/prysmbootnode.log | tail -n 1)
+        --minimum-peers-per-subnet=${CON3_MINIMUM_PEERS_PER_SUBNET}
+        --min-sync-peers=${CON3_MIN_SYNC_PEERS}
+        --p2p-quic-port=${CON3_P2P_QUIC_PORT}
+        --p2p-tcp-port=${CON3_P2P_TCP_PORT}
+        --p2p-udp-port=${CON3_P2P_UDP_PORT}
+        --execution-endpoint=/nodeData/node3/geth.ipc
+        --datadir=/nodeData/node3/consensus/beacondata
+        --accept-terms-of-use
+        --chain-config-file=/originData/chain-config.yml
+        --genesis-state=/nodeData/node3/consensus/genesis.ssz
+        --interop-eth1data-votes
+        --contract-deployment-block=${CONTRACT_DEPLOYMENT_BLOCK}
+        --deposit-contract=${DEPOSIT_CONTRACT}
+        --suggested-fee-recipient=${CON3_SUGGESTED_FEE_RECIPIENT}
+        --slasher
+        --slasher-datadir=/nodeData/node3/consensus/slasherdata
+        --monitoring-host=${CON3_MONITORING_HOST}
+        --monitoring-port=${CON3_MONITORING_PORT}
+        --verbosity=${CON3_VERBOSITY}
+    networks:
+      - private-network
+
+  node3-val:
+    build:
+      context: .
+      dockerfile: ./dockerfile/validator
+    ports:
+      - "${VAL3_RPC_PORT}:${VAL3_RPC_PORT}"
+      - "${VAL3_GRPC_GATEWAY_PORT}:${VAL3_GRPC_GATEWAY_PORT}"
+      - "${VAL3_MONITORING_PORT}:${VAL3_MONITORING_PORT}"
+    volumes:
+      - ./originData:/originData
+      - ./nodeData/node3:/nodeData/node3
+    entrypoint: ["bash", "-c"]
+    command: 
+      - >
+        dockerize -wait file:///nodeData/node3/consensus/genesis.ssz -timeout 30s &&
+        validator
+        --rpc-host=${VAL3_RPC_HOST}
+        --rpc-port=${VAL3_RPC_PORT}
+        --grpc-gateway-host=${VAL3_GRPC_GATEWAY_HOST}
+        --grpc-gateway-port=${VAL3_GRPC_GATEWAY_PORT}
+        --beacon-rpc-provider=${CON3_RPC_HOST}:${CON3_RPC_PORT}
+        --beacon-rpc-gateway-provider=${CON3_GRPC_GATEWAY_HOST}:${CON3_GRPC_GATEWAY_PORT}
+        --datadir=/nodeData/node3/consensus/validatordata
+        --accept-terms-of-use
+        --chain-config-file=/originData/chain-config.yml
+        --monitoring-host=${VAL3_MONITORING_HOST}
+        --monitoring-port=${VAL3_MONITORING_PORT}
+        --interop-num-validators=${VAL3_INTEROP_NUM_VALIDATORS}
+        --interop-start-index=${VAL3_INTEROP_START_INDEX}
+    networks:
+      - private-network

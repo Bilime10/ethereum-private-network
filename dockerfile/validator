@@ -1,0 +1,18 @@
+FROM --platform=linux/amd64 ubuntu:latest
+
+ENV DOCKERIZE_VERSION=v0.7.0
+ENV PRYSM_VERSION=v5.0.4
+
+RUN apt-get update && apt-get install -y curl
+
+RUN curl -L https://github.com/jwilder/dockerize/releases/download/${DOCKERIZE_VERSION}/dockerize-alpine-linux-amd64-${DOCKERIZE_VERSION}.tar.gz --output /dockerize-alpine-linux-amd64-${DOCKERIZE_VERSION}.tar.gz
+    
+RUN tar xzf /dockerize-alpine-linux-amd64-${DOCKERIZE_VERSION}.tar.gz -C /usr/local/bin
+
+RUN chmod +x /usr/local/bin/dockerize
+
+RUN curl -L https://github.com/prysmaticlabs/prysm/releases/download/${PRYSM_VERSION}/validator-${PRYSM_VERSION}-linux-amd64 --output /usr/local/bin/validator
+
+RUN chmod +x /usr/local/bin/validator
+
+RUN export PATH=$PATH:/usr/local/bin
