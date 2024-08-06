@@ -24,16 +24,15 @@ services:
     entrypoint: ["bash", "-c"]
     command:
       - >
+        ifconfig | grep 'inet ' | awk '{print $2}' | head -n 1 > /bootipfs/bootipfsnodeip.txt &&
+        ipfs-swarm-key-gen > /bootipfs/swarm.key &&
         ipfs init &&
+        ipfs id -f="<id>" > /bootipfs/bootipfsnodeid.txt &&
         ipfs config Addresses.API /ip4/0.0.0.0/tcp/5001 &&
         ipfs config Addresses.Gateway /ip4/0.0.0.0/tcp/8080 &&
         ipfs bootstrap rm --all &&
-        ipfs id -f="<id>" > /bootipfs/bootipfsnodeid.txt &&
-        ipfs-swarm-key-gen > /bootipfs/swarm.key &&
         cp /bootipfs/swarm.key /data/ipfs/swarm.key &&
-        ipfs daemon --enable-gc & sleep 5 &&
-        ipfs id -f="<addrs>\n" > /bootipfs/bootipfsnodeaddrs.txt &&
-        sleep infinity
+        ipfs daemon
     networks:
       - private-network
 
@@ -62,10 +61,10 @@ services:
         ipfs config Addresses.API /ip4/0.0.0.0/tcp/5001 &&
         ipfs config Addresses.Gateway /ip4/0.0.0.0/tcp/8080 &&
         ipfs bootstrap rm --all &&
-        dockerize -wait file:///bootipfs/swarm.key -wait file:///bootipfs/bootipfsnodeaddrs.txt -timeout 30s &&
-        ipfs bootstrap add $(head -n 2 /bootipfs/bootipfsnodeaddrs.txt | tail -n 1) &&
+        dockerize -wait file:///bootipfs/swarm.key -wait file:///bootipfs/bootipfsnodeip.txt -wait file:///bootipfs/bootipfsnodeid.txt -timeout 300s &&
+        ipfs bootstrap add /ip4/$(head -n 1 /bootipfs/bootipfsnodeip.txt)/tcp/4001/p2p/$(head -n 1 /bootipfs/bootipfsnodeid.txt) &&
         cp /bootipfs/swarm.key /data/ipfs/swarm.key &&
-        ipfs daemon --enable-gc
+        ipfs daemon
     networks:
       - private-network
     depends_on:
@@ -96,10 +95,10 @@ services:
         ipfs config Addresses.API /ip4/0.0.0.0/tcp/5001 &&
         ipfs config Addresses.Gateway /ip4/0.0.0.0/tcp/8080 &&
         ipfs bootstrap rm --all &&
-        dockerize -wait file:///bootipfs/swarm.key -wait file:///bootipfs/bootipfsnodeaddrs.txt -timeout 30s &&
-        ipfs bootstrap add $(head -n 2 /bootipfs/bootipfsnodeaddrs.txt | tail -n 1) &&
+        dockerize -wait file:///bootipfs/swarm.key -wait file:///bootipfs/bootipfsnodeip.txt -wait file:///bootipfs/bootipfsnodeid.txt -timeout 300s &&
+        ipfs bootstrap add /ip4/$(head -n 1 /bootipfs/bootipfsnodeip.txt)/tcp/4001/p2p/$(head -n 1 /bootipfs/bootipfsnodeid.txt) &&
         cp /bootipfs/swarm.key /data/ipfs/swarm.key &&
-        ipfs daemon --enable-gc
+        ipfs daemon
     networks:
       - private-network
     depends_on:
@@ -199,7 +198,7 @@ services:
     entrypoint: ["bash", "-c"]
     command:
       - >
-        dockerize -wait file:///nodeData/bootnode/gethbootnode.log -wait file:///nodeData/node1/execution/genesis.json -timeout 30s &&
+        dockerize -wait file:///nodeData/bootnode/gethbootnode.log -wait file:///nodeData/node1/execution/genesis.json -timeout 300s &&
         sed -i '1s/^\(.\{137\}\).\{9\}/\1bootnode-exe/' ./nodeData/bootnode/gethbootnode.log &&
         geth --datadir=/nodeData/node1/execution/gethdata init /nodeData/node1/execution/genesis.json &&
         geth 
@@ -251,7 +250,7 @@ services:
     entrypoint: ["bash", "-c"]
     command:
       - >
-        dockerize -wait file:///nodeData/node1/consensus/genesis.ssz -wait file:///nodeData/node1/geth.ipc -timeout 30s &&
+        dockerize -wait file:///nodeData/node1/consensus/genesis.ssz -wait file:///nodeData/node1/geth.ipc -timeout 300s &&
         beacon-chain
         --rpc-host=${CON1_RPC_HOST}
         --rpc-port=${CON1_RPC_PORT}
@@ -296,7 +295,7 @@ services:
     entrypoint: ["bash", "-c"]
     command: 
       - >
-        dockerize -wait file:///nodeData/node1/consensus/genesis.ssz -timeout 30s &&
+        dockerize -wait file:///nodeData/node1/consensus/genesis.ssz -timeout 300s &&
         validator
         --rpc-host=${VAL1_RPC_HOST}
         --rpc-port=${VAL1_RPC_PORT}
@@ -332,7 +331,7 @@ services:
     entrypoint: ["bash", "-c"]
     command:
       - >
-        dockerize -wait file:///nodeData/node2/execution/genesis.json -wait http://${EXE1_METRICS_ADDR}:${EXE1_METRICS_PORT}/debug/metrics -timeout 30s &&
+        dockerize -wait file:///nodeData/node2/execution/genesis.json -wait http://${EXE1_METRICS_ADDR}:${EXE1_METRICS_PORT}/debug/metrics -timeout 300s &&
         geth --datadir=/nodeData/node2/execution/gethdata init /nodeData/node2/execution/genesis.json &&
         geth 
         --identity=${EXE2_IDENTITY}
@@ -383,7 +382,7 @@ services:
     entrypoint: ["bash", "-c"]
     command:
       - >
-        dockerize -wait file:///nodeData/node2/consensus/genesis.ssz -wait file:///nodeData/node2/geth.ipc -wait tcp://${CON1_MONITORING_HOST}:${CON1_MONITORING_PORT} -timeout 30s &&
+        dockerize -wait file:///nodeData/node2/consensus/genesis.ssz -wait file:///nodeData/node2/geth.ipc -wait tcp://${CON1_MONITORING_HOST}:${CON1_MONITORING_PORT} -timeout 300s &&
         curl ${CON1_MONITORING_HOST}:${CON1_MONITORING_PORT}/p2p > /nodeData/bootnode/prysmbootnode.log &&
         sed -i '2s/^\(.\{5\}\)//;' /nodeData/bootnode/prysmbootnode.log &&
         beacon-chain
@@ -430,7 +429,7 @@ services:
     entrypoint: ["bash", "-c"]
     command: 
       - >
-        dockerize -wait file:///nodeData/node2/consensus/genesis.ssz -timeout 30s &&
+        dockerize -wait file:///nodeData/node2/consensus/genesis.ssz -timeout 300s &&
         validator
         --rpc-host=${VAL2_RPC_HOST}
         --rpc-port=${VAL2_RPC_PORT}
@@ -466,7 +465,7 @@ services:
     entrypoint: ["bash", "-c"]
     command:
       - >
-        dockerize -wait file:///nodeData/node3/execution/genesis.json -wait http://${EXE1_METRICS_ADDR}:${EXE1_METRICS_PORT}/debug/metrics -timeout 30s &&
+        dockerize -wait file:///nodeData/node3/execution/genesis.json -wait http://${EXE1_METRICS_ADDR}:${EXE1_METRICS_PORT}/debug/metrics -timeout 300s &&
         geth --datadir=/nodeData/node3/execution/gethdata init /nodeData/node3/execution/genesis.json &&
         geth 
         --identity=${EXE3_IDENTITY}
@@ -517,7 +516,7 @@ services:
     entrypoint: ["bash", "-c"]
     command:
       - >
-        dockerize -wait file:///nodeData/node3/consensus/genesis.ssz -wait file:///nodeData/node3/geth.ipc -wait tcp://${CON2_MONITORING_HOST}:${CON2_MONITORING_PORT} -timeout 30s &&
+        dockerize -wait file:///nodeData/node3/consensus/genesis.ssz -wait file:///nodeData/node3/geth.ipc -wait tcp://${CON2_MONITORING_HOST}:${CON2_MONITORING_PORT} -timeout 300s &&
         beacon-chain
         --rpc-host=${CON3_RPC_HOST}
         --rpc-port=${CON3_RPC_PORT}
@@ -562,7 +561,7 @@ services:
     entrypoint: ["bash", "-c"]
     command: 
       - >
-        dockerize -wait file:///nodeData/node3/consensus/genesis.ssz -timeout 30s &&
+        dockerize -wait file:///nodeData/node3/consensus/genesis.ssz -timeout 300s &&
         validator
         --rpc-host=${VAL3_RPC_HOST}
         --rpc-port=${VAL3_RPC_PORT}
