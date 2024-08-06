@@ -1,0 +1,20 @@
+FROM --platform=linux/amd64 ubuntu:latest
+
+ENV DOCKERIZE_VERSION=v0.7.0
+ENV IPFS_CLUSTER_VERSION=v1.1.1
+
+RUN apt-get update && apt-get install -y curl
+
+RUN curl -L https://github.com/jwilder/dockerize/releases/download/${DOCKERIZE_VERSION}/dockerize-alpine-linux-amd64-${DOCKERIZE_VERSION}.tar.gz --output /dockerize-alpine-linux-amd64-${DOCKERIZE_VERSION}.tar.gz
+    
+RUN tar xzf /dockerize-alpine-linux-amd64-${DOCKERIZE_VERSION}.tar.gz -C /usr/local/bin
+
+RUN chmod +x /usr/local/bin/dockerize
+
+RUN curl -L https://dist.ipfs.tech/ipfs-cluster-service/${IPFS_CLUSTER_VERSION}/ipfs-cluster-service_${IPFS_CLUSTER_VERSION}_linux-amd64.tar.gz --output /ipfs-cluster-service_${IPFS_CLUSTER_VERSION}_linux-amd64.tar.gz
+
+RUN tar xzf /ipfs-cluster-service_${IPFS_CLUSTER_VERSION}_linux-amd64.tar.gz -C /
+
+RUN mv /ipfs-cluster-service/ipfs-cluster-service /usr/local/bin/ipfs-cluster-service
+
+RUN chmod +x /usr/local/bin/ipfs-cluster-service
