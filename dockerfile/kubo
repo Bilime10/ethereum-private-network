@@ -2,7 +2,13 @@ FROM --platform=linux/amd64 ubuntu:latest
 
 ENV DOCKERIZE_VERSION=v0.7.0
 
-RUN apt-get update && apt-get install -y git gcc make golang curl net-tools
+RUN apt-get update && apt-get install -y git gcc make curl net-tools
+
+RUN curl -L https://go.dev/dl/go1.23.3.linux-amd64.tar.gz --output /go1.23.3.linux-amd64.tar.gz
+
+RUN tar -C /usr/local -xzf /go1.23.3.linux-amd64.tar.gz
+
+ENV PATH=$PATH:/usr/local/go/bin
 
 RUN curl -L https://github.com/jwilder/dockerize/releases/download/${DOCKERIZE_VERSION}/dockerize-alpine-linux-amd64-${DOCKERIZE_VERSION}.tar.gz --output /dockerize-alpine-linux-amd64-${DOCKERIZE_VERSION}.tar.gz
     
